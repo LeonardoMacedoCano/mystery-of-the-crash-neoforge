@@ -1,0 +1,9 @@
+{
+  "block.mysteryofthecrash.alien_debris": "Alien Debris",
+  "block.mysteryofthecrash.spaceship_core": "Spaceship Core",
+  "item.mysteryofthecrash.alien_debris": "Alien Debris",
+  "item.mysteryofthecrash.spaceship_core": "Spaceship Core",
+  "entity.mysteryofthecrash.alien": "The Alien",
+  "mysteryofthecrash.telepathy.prefix": "[Telepathy]",
+  "mysteryofthecrash.crash_site.found": "You sense something... a presence, not too far away."
+}

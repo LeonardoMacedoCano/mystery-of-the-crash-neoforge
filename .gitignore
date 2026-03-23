@@ -1,0 +1,60 @@
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# Eclipse
+*.launch
+.settings/
+.metadata
+.classpath
+.project
+.recommenders
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Visual Studio Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Minecraft Run Directories
+run/
+runs/
+logs/
+
+# Forge/NeoForge
+.cache/
+.mixin.out/
+
+# Compiled files
+*.class
+*.jar
+!gradle-wrapper.jar
+
+# Generated resources
+src/generated/
+
+# Claude Code
+CLAUDE.md
+
+# Other
+*.log
+*.swp
+*.swo
+*~
+.cache
+*.tmp
+
+.omc/
