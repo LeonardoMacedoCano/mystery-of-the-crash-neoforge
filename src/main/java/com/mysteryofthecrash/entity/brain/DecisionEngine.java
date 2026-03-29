@@ -39,9 +39,13 @@ public class DecisionEngine {
         currentAction = evaluate(alien);
 
         if (currentAction != previous) {
+            var nearP = alien.level().getNearestPlayer(alien, 32.0);
+            float logTrust = (nearP != null)
+                    ? alien.getTrustManager().getTrust(nearP.getUUID())
+                    : alien.getTrustManager().getHighestTrust();
             MysteryOfTheCrash.LOGGER.info("[Alien] Decision changed: {} -> {} | Bond={} Hunger={} SocNeed={}",
                     previous, currentAction,
-                    String.format("%.0f", alien.getTrustManager().getTrust()),
+                    String.format("%.0f", logTrust),
                     String.format("%.0f", alien.getNeeds().hunger),
                     String.format("%.0f", alien.getNeeds().socialNeed));
         }
@@ -55,7 +59,12 @@ public class DecisionEngine {
         AlienNeeds   needs       = alien.getNeeds();
         Personality  personality = alien.getPersonality();
         TrustManager trust       = alien.getTrustManager();
-        float        trustLevel  = trust.getTrust();
+
+        var nearestPlayer = alien.level().getNearestPlayer(alien, 32.0);
+        float trustLevel = (nearestPlayer != null)
+                ? trust.getTrust(nearestPlayer.getUUID())
+                : trust.getHighestTrust();
+        java.util.UUID nearestId = (nearestPlayer != null) ? nearestPlayer.getUUID() : null;
 
         Map<Action, Float> scores = new EnumMap<>(Action.class);
 
@@ -79,7 +88,9 @@ public class DecisionEngine {
         if (alien.hasKnowledge(KnowledgeFlags.KNOWS_MINING)
                 || alien.hasKnowledge(KnowledgeFlags.KNOWS_PLANTING)) {
             collectScore = needs.boredom * 0.4f * personality.helpWeight;
-            if (trust.willAssistAutonomously()) collectScore *= 1.5f;
+            boolean assists = (nearestId != null) ? trust.willAssistAutonomously(nearestId)
+                    : !trust.isAvoidantToAll();
+            if (assists) collectScore *= 1.5f;
         }
         scores.put(Action.COLLECT_ITEMS, collectScore);
 
@@ -104,7 +115,8 @@ public class DecisionEngine {
             }
         }
 
-        if (trust.isAvoidant()) {
+        boolean avoidant = (nearestId != null) ? trust.isAvoidant(nearestId) : trust.isAvoidantToAll();
+        if (avoidant) {
             scores.merge(Action.FOLLOW_PLAYER, 0f, (old, zero) -> old * 0.1f);
             scores.merge(Action.EXPLORE,       0f, (old, zero) -> old * 1.4f);
         }

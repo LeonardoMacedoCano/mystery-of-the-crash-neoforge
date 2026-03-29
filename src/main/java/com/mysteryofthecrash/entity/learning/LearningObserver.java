@@ -36,11 +36,8 @@ public class LearningObserver {
                 () -> miningProgress, v -> miningProgress = v);
         miningSkill = Math.min(100f, miningSkill + mult * 0.5f);
 
-        if (block == Blocks.IRON_ORE || block == Blocks.DEEPSLATE_IRON_ORE
-                || block == Blocks.RAW_IRON_BLOCK || block == Blocks.IRON_BLOCK) {
-            addProgress(alien, "iron", mult * 0.2f, KnowledgeFlags.KNOWS_IRON,
-                    () -> ironProgress, v -> ironProgress = v);
-        }
+        MineableBlock.fromBlock(block).ifPresent(mb ->
+                alien.getMiningKnowledge().addProficiency(mb, mult * 2.0f));
 
         alien.getPersonalityResolver().recordTeachEvent(0.5f * mult);
     }

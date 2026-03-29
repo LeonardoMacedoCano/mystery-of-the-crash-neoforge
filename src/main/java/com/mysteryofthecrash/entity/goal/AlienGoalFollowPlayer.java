@@ -30,16 +30,16 @@ public class AlienGoalFollowPlayer extends Goal {
         target = alien.level().getNearestPlayer(alien, 32.0);
         if (target == null) return false;
 
-        if (alien.getTrustManager().isAvoidant()) return false;
+        if (alien.getTrustManager().isAvoidant(target.getUUID())) return false;
 
-        float stopDist = alien.getTrustManager().preferredProximity();
+        float stopDist = alien.getTrustManager().preferredProximity(target.getUUID());
         return target.distanceTo(alien) > stopDist + 1.0f;
     }
 
     @Override
     public boolean canContinueToUse() {
         if (!enabled || target == null || !target.isAlive()) return false;
-        float stopDist = alien.getTrustManager().preferredProximity();
+        float stopDist = alien.getTrustManager().preferredProximity(target.getUUID());
         return target.distanceTo(alien) > stopDist;
     }
 
@@ -56,7 +56,6 @@ public class AlienGoalFollowPlayer extends Goal {
 
         if (--recalcTimer <= 0) {
             recalcTimer = 10;
-            float stopDist = alien.getTrustManager().preferredProximity();
             alien.getNavigation().moveTo(target, WALK_SPEED);
         }
     }

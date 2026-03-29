@@ -3,6 +3,7 @@ package com.mysteryofthecrash.chat;
 import com.mysteryofthecrash.entity.AlienEntity;
 import com.mysteryofthecrash.entity.LifeStage;
 import com.mysteryofthecrash.entity.Personality;
+import com.mysteryofthecrash.entity.learning.MineableBlock;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,7 +12,9 @@ import net.minecraft.world.entity.player.Player;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
+import java.util.stream.Collectors;
 
 public class TelepathicChat {
 
@@ -97,6 +100,10 @@ public class TelepathicChat {
         broadcastToNearby(alien, base);
     }
 
+    public void sendDirectMessage(LivingEntity alien, String message) {
+        broadcastToNearby(alien, message);
+    }
+
     public boolean interpretPlayerMessage(AlienEntity alien, Player player,
                                           String message, LifeStage stage,
                                           Personality personality) {
@@ -104,14 +111,14 @@ public class TelepathicChat {
 
         if (lower.contains("come") || lower.contains("follow") || lower.contains("here")) {
 
-            if (alien.getTrustManager().isAvoidant()) {
+            if (alien.getTrustManager().isAvoidantToAll()) {
                 respondTo(alien, stage, personality,
                         "◈ ...no.",
                         "I don't want to.",
                         "You don't get to tell me what to do.");
             } else {
                 if (alien.getAlienBrain() != null) {
-                    alien.getAlienBrain().commandFollow();
+                    alien.getAlienBrain().commandFollow(player);
                 }
                 respondTo(alien, stage, personality,
                         "...coming.",
@@ -130,6 +137,23 @@ public class TelepathicChat {
                     "...still.",
                     "I'll wait here.",
                     "Fine. I'll stay.");
+            return true;
+        }
+
+        if (lower.startsWith("mining:")) {
+            String rest = lower.substring(7).trim();
+            String[] parts = rest.split("\\s+", 2);
+            String blockId = parts[0];
+            int durationSeconds = 300;
+            if (parts.length > 1) {
+                try { durationSeconds = Integer.parseInt(parts[1]); } catch (NumberFormatException ignored) {}
+            }
+            handleMineCommand(alien, player, stage, personality, blockId, durationSeconds * 20);
+            return true;
+        }
+
+        if (lower.equals("mining")) {
+            handleMineList(alien, player, stage, personality);
             return true;
         }
 
@@ -166,6 +190,87 @@ public class TelepathicChat {
         }
 
         return false;
+    }
+
+    private void handleMineList(AlienEntity alien, Player player,
+                                LifeStage stage, Personality personality) {
+        if (!alien.getLifeStage().canMine) {
+            respondTo(alien, stage, personality,
+                    "◈ ...not yet.",
+                    "I'm not ready for that.",
+                    "Later.");
+            return;
+        }
+
+        List<MineableBlock> known = alien.getMiningKnowledge().getKnownBlocks();
+
+        if (known.isEmpty()) {
+            respondTo(alien, stage, personality,
+                    "◈ ...nothing.",
+                    "I haven't learned to mine anything yet.",
+                    "I don't know enough about mining.");
+            return;
+        }
+
+        String blockList = known.stream()
+                .map(b -> b.id + " (" + String.format("%.0f", alien.getMiningKnowledge().getProficiency(b)) + ")")
+                .collect(Collectors.joining(", "));
+
+        if (player instanceof ServerPlayer sp) {
+            sp.sendSystemMessage(Component.literal("§b[Telepathy] §7Known blocks: §f" + blockList));
+        }
+    }
+
+    private void handleMineCommand(AlienEntity alien, Player player,
+                                   LifeStage stage, Personality personality,
+                                   String blockId, int durationTicks) {
+        if (!alien.getLifeStage().canMine) {
+            respondTo(alien, stage, personality,
+                    "◈ ...not yet.",
+                    "I'm not ready for that.",
+                    "Later.");
+            return;
+        }
+
+        Optional<MineableBlock> opt = MineableBlock.fromId(blockId);
+        if (opt.isEmpty()) {
+            if (player instanceof ServerPlayer sp) {
+                sp.sendSystemMessage(Component.literal(
+                        "§c[Telepathy] Unknown block: §f" + blockId
+                        + " §7— try: mining"));
+            }
+            return;
+        }
+
+        MineableBlock target = opt.get();
+
+        if (!alien.getMiningKnowledge().isKnown(target)) {
+            respondTo(alien, stage, personality,
+                    "◈ ...don't know that.",
+                    "I haven't learned to mine " + target.displayName + " yet.",
+                    "My proficiency with " + target.displayName + " isn't there yet.");
+            return;
+        }
+
+        if (!(alien.level() instanceof ServerLevel)) return;
+
+        if (alien.getStoredTool().isEmpty()) {
+            respondTo(alien, stage, personality,
+                    "◈ ...need tool.",
+                    "I need a pickaxe for that. Give me one.",
+                    "I don't have a mining tool. Give me one first.");
+            return;
+        }
+
+        if (alien.getAlienBrain() != null) {
+            alien.getAlienBrain().commandMine(target, durationTicks);
+        }
+
+        int seconds = durationTicks / 20;
+        respondTo(alien, stage, personality,
+                "...break.",
+                "On it. Mining " + target.displayName + " for " + seconds + "s.",
+                "I'll handle it. " + seconds + " seconds.");
     }
 
     private String pickMessage(LifeStage stage, Personality personality) {

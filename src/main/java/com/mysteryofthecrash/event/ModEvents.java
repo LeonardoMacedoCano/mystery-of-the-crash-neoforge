@@ -4,13 +4,15 @@ import com.mysteryofthecrash.MysteryOfTheCrash;
 import com.mysteryofthecrash.command.AlienCommand;
 import com.mysteryofthecrash.entity.AlienEntity;
 import com.mysteryofthecrash.registry.ModEntities;
+import com.mysteryofthecrash.util.BlockUtil;
+import com.mysteryofthecrash.util.EntityUtil;
 import com.mysteryofthecrash.world.AlienWorldData;
 import com.mysteryofthecrash.world.CrashSiteGenerator;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
+import net.minecraft.nbt.CompoundTag;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.ServerChatEvent;
@@ -55,13 +57,12 @@ public class ModEvents {
             return;
         }
 
-        Entity entity = level.getEntity(uuid);
-        if (entity instanceof AlienEntity alien && alien.isAlive()) {
+        if (EntityUtil.findAlienGlobal(level).isPresent()) {
             MysteryOfTheCrash.LOGGER.info("[ModEvents] Alien found alive: {}", uuid);
             return;
         }
 
-        if (data.isNeedsRespawn() || entity == null || !entity.isAlive()) {
+        if (data.isNeedsRespawn()) {
             MysteryOfTheCrash.LOGGER.info("[ModEvents] Alien missing — respawning at {}",
                     data.getRespawnPos());
             spawnAlienAt(level, data);
@@ -74,11 +75,24 @@ public class ModEvents {
 
         var pos = data.getRespawnPos();
         alien.setCrashSitePos(data.getCrashSitePos());
-        alien.moveTo(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, 0f, 0f);
+        int safeY = BlockUtil.getSafeYBlocking(level, pos);
+        alien.moveTo(pos.getX() + 0.5, safeY, pos.getZ() + 0.5, 0f, 0f);
         alien.finalizeSpawn(level,
                 level.getCurrentDifficultyAt(pos),
                 net.minecraft.world.entity.MobSpawnType.EVENT,
                 null);
+
+        if (data.isRetainProgressOnDeath() && data.getSavedAlienProgress() != null) {
+            CompoundTag wrapper = new CompoundTag();
+            wrapper.put("AlienData", data.getSavedAlienProgress());
+            alien.readAdditionalSaveData(wrapper);
+
+            alien.moveTo(pos.getX() + 0.5, safeY, pos.getZ() + 0.5, 0f, 0f);
+            alien.setHealth(alien.getMaxHealth());
+            data.setSavedAlienProgress(null);
+            MysteryOfTheCrash.LOGGER.info("[ModEvents] Alien respawned with full progression retained.");
+        }
+
         level.addFreshEntity(alien);
         data.setAlienUUID(alien.getUUID());
         data.setNeedsRespawn(false);
@@ -90,7 +104,7 @@ public class ModEvents {
         if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
         Player player = event.getPlayer();
 
-        findNearbyAlien(serverLevel, player, 12.0).ifPresent(alien ->
+        EntityUtil.findNearbyAlien(serverLevel, player, 12.0).ifPresent(alien ->
             alien.getLearner().onPlayerBreakBlock(alien,
                     event.getState().getBlock(), player, event.getPos()));
     }
@@ -103,7 +117,7 @@ public class ModEvents {
         var be = serverLevel.getBlockEntity(event.getPos());
         if (!(be instanceof ChestBlockEntity) && !(be instanceof BarrelBlockEntity)) return;
 
-        findNearbyAlien(serverLevel, event.getEntity(), 12.0).ifPresent(alien ->
+        EntityUtil.findNearbyAlien(serverLevel, event.getEntity(), 12.0).ifPresent(alien ->
             alien.getLearner().onPlayerAccessStorage(alien, event.getEntity()));
     }
 
@@ -112,7 +126,7 @@ public class ModEvents {
         if (!(event.getEntity() instanceof Player player)) return;
         if (!(player.level() instanceof ServerLevel serverLevel)) return;
 
-        findNearbyAlien(serverLevel, player, 12.0).ifPresent(alien ->
+        EntityUtil.findNearbyAlien(serverLevel, player, 12.0).ifPresent(alien ->
             alien.getLearner().onPlayerCraft(alien, player, null));
     }
 
@@ -121,7 +135,7 @@ public class ModEvents {
         if (!(event.getEntity() instanceof Player player)) return;
         if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
 
-        findNearbyAlien(serverLevel, player, 12.0).ifPresent(alien ->
+        EntityUtil.findNearbyAlien(serverLevel, player, 12.0).ifPresent(alien ->
             alien.getLearner().onPlayerFarm(alien, event.getState().getBlock(), player));
     }
 
@@ -131,7 +145,7 @@ public class ModEvents {
         Player player = event.getPlayer();
         String message = event.getMessage().getString();
 
-        findNearbyAlien(level, player, 32.0).ifPresent(alien ->
+        EntityUtil.findAlienGlobal(level).ifPresent(alien ->
             alien.getTelepathicChat().interpretPlayerMessage(
                     alien, player, message,
                     alien.getLifeStage(), alien.getPersonality()));
@@ -145,16 +159,24 @@ public class ModEvents {
         ServerLevel level = (ServerLevel) event.getEntity().level();
         AlienWorldData data = AlienWorldData.get(level);
         data.setNeedsRespawn(true);
+
+        if (data.isRetainProgressOnDeath()) {
+            CompoundTag wrapper = new CompoundTag();
+            alien.addAdditionalSaveData(wrapper);
+            if (wrapper.contains("AlienData")) {
+                data.setSavedAlienProgress(wrapper.getCompound("AlienData"));
+                MysteryOfTheCrash.LOGGER.info("[ModEvents] Alien progress saved for respawn.");
+            }
+        }
+
         data.setDirty();
         MysteryOfTheCrash.LOGGER.info("[ModEvents] Alien died — flagged for respawn at {}",
                 data.getRespawnPos());
-    }
 
-    private static java.util.Optional<AlienEntity> findNearbyAlien(
-            ServerLevel level, Player player, double radius) {
-        return level.getEntitiesOfClass(AlienEntity.class,
-                player.getBoundingBox().inflate(radius))
-                .stream()
-                .findFirst();
+        net.minecraft.network.chat.Component deathMsg = net.minecraft.network.chat.Component.literal(
+                "§c[Telepathy] §7...the signal faded. The alien is gone. It will return.");
+        for (var player : level.players()) {
+            player.sendSystemMessage(deathMsg);
+        }
     }
 }

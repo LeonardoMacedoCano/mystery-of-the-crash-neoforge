@@ -1,17 +1,19 @@
 package com.mysteryofthecrash.entity.goal;
 
 import com.mysteryofthecrash.entity.AlienEntity;
+import com.mysteryofthecrash.entity.Personality;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.player.Player;
 
 import java.util.EnumSet;
 
 public class AlienGoalRest extends Goal {
 
     private final AlienEntity alien;
-    private boolean enabled = false;
-    private boolean running = false;
-    private int ticksResting = 0;
-    private int maxRestTicks = 200;
+    private boolean enabled      = false;
+    private boolean running      = false;
+    private int     ticksResting = 0;
+    private int     maxRestTicks = 200;
 
     public AlienGoalRest(AlienEntity alien) {
         this.alien = alien;
@@ -24,21 +26,24 @@ public class AlienGoalRest extends Goal {
     @Override
     public boolean canUse() {
         if (!enabled) return false;
-        return alien.getNeeds().safety < 30f;
+
+        return alien.getNeeds().safety < 30f || alien.getNeeds().sleepiness > 70f;
     }
 
     @Override
     public boolean canContinueToUse() {
-        return enabled && ticksResting < maxRestTicks && alien.getNeeds().safety < 50f;
+        if (!enabled) return false;
+        if (ticksResting >= maxRestTicks) return false;
+
+        return alien.getNeeds().safety < 50f || alien.getNeeds().sleepiness > 20f;
     }
 
     @Override
     public void start() {
-        running = true;
+        running      = true;
         ticksResting = 0;
         alien.getNavigation().stop();
-        float lazyMult = alien.getPersonality() == com.mysteryofthecrash.entity.Personality.LAZY
-                ? 2.0f : 1.0f;
+        float lazyMult = alien.getPersonality() == Personality.LAZY ? 2.0f : 1.0f;
         maxRestTicks = (int)(200 * lazyMult);
 
         if (alien.level().random.nextFloat() < 0.3f) {
@@ -53,17 +58,21 @@ public class AlienGoalRest extends Goal {
         alien.getNavigation().stop();
 
         if (ticksResting % 40 == 0) {
+
             alien.getNeeds().feed(1f);
-            var player = alien.level().getNearestPlayer(alien, 8.0);
+
+            alien.getNeeds().sleepiness = Math.max(0f, alien.getNeeds().sleepiness - 10f);
+
+            Player player = alien.level().getNearestPlayer(alien, 8.0);
             if (player != null) {
-                alien.getTrustManager().onPlayerNearbyRest();
+                alien.getTrustManager().onPlayerNearbyRest(player.getUUID());
             }
         }
     }
 
     @Override
     public void stop() {
-        running = false;
+        running      = false;
         ticksResting = 0;
     }
 }

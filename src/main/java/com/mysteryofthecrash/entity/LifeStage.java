@@ -2,22 +2,25 @@ package com.mysteryofthecrash.entity;
 
 public enum LifeStage {
 
-    CHILD(0, 6, 8.0f, 0.18f),
-    YOUNG(7, 20, 18.0f, 0.24f),
-    ADULT(21, Integer.MAX_VALUE, 30.0f, 0.30f);
+    CHILD(0,  2,  8.0f, 0.18f, false, false),
+    YOUNG(3,  14, 20.0f, 0.26f, true,  true),
+    ADULT(15, Integer.MAX_VALUE, 40.0f, 0.30f, true, true);
 
-    public final int minDays;
-    public final int maxDays;
-
+    public final int   minDays;
+    public final int   maxDays;
     public final float maxHealth;
-
     public final float moveSpeed;
+    public final boolean canMine;
+    public final boolean canEquipGear;
 
-    LifeStage(int minDays, int maxDays, float maxHealth, float moveSpeed) {
-        this.minDays = minDays;
-        this.maxDays = maxDays;
-        this.maxHealth = maxHealth;
-        this.moveSpeed = moveSpeed;
+    LifeStage(int minDays, int maxDays, float maxHealth, float moveSpeed,
+              boolean canMine, boolean canEquipGear) {
+        this.minDays     = minDays;
+        this.maxDays     = maxDays;
+        this.maxHealth   = maxHealth;
+        this.moveSpeed   = moveSpeed;
+        this.canMine     = canMine;
+        this.canEquipGear = canEquipGear;
     }
 
     public static LifeStage fromDays(int days) {

@@ -7,17 +7,22 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 
+import javax.annotation.Nullable;
+
 import java.util.UUID;
 
 public class AlienWorldData extends SavedData {
 
     private static final String DATA_NAME = "mysteryofthecrash_world";
 
-    private boolean crashSiteGenerated = false;
-    private BlockPos crashSitePos      = BlockPos.ZERO;
-    private BlockPos respawnPos        = BlockPos.ZERO;
-    private boolean  needsRespawn      = false;
-    private UUID     alienUUID         = null;
+    private boolean     crashSiteGenerated    = false;
+    private BlockPos    crashSitePos          = BlockPos.ZERO;
+    private BlockPos    respawnPos            = BlockPos.ZERO;
+    private boolean     needsRespawn          = false;
+    private UUID        alienUUID             = null;
+    private boolean     retainProgressOnDeath = false;
+    @Nullable
+    private CompoundTag savedAlienProgress    = null;
 
     private static final SavedData.Factory<AlienWorldData> FACTORY =
             new SavedData.Factory<>(AlienWorldData::new,
@@ -42,6 +47,10 @@ public class AlienWorldData extends SavedData {
         if (alienUUID != null) {
             tag.putUUID("alienUUID", alienUUID);
         }
+        tag.putBoolean("retainProgressOnDeath", retainProgressOnDeath);
+        if (savedAlienProgress != null) {
+            tag.put("savedAlienProgress", savedAlienProgress);
+        }
         return tag;
     }
 
@@ -60,6 +69,10 @@ public class AlienWorldData extends SavedData {
         if (tag.hasUUID("alienUUID")) {
             data.alienUUID = tag.getUUID("alienUUID");
         }
+        data.retainProgressOnDeath = tag.getBoolean("retainProgressOnDeath");
+        if (tag.contains("savedAlienProgress")) {
+            data.savedAlienProgress = tag.getCompound("savedAlienProgress");
+        }
         return data;
     }
 
@@ -77,4 +90,11 @@ public class AlienWorldData extends SavedData {
 
     public UUID     getAlienUUID()                      { return alienUUID; }
     public void     setAlienUUID(UUID uuid)             { alienUUID = uuid; setDirty(); }
+
+    public boolean     isRetainProgressOnDeath()              { return retainProgressOnDeath; }
+    public void        setRetainProgressOnDeath(boolean v)    { retainProgressOnDeath = v; setDirty(); }
+
+    @Nullable
+    public CompoundTag getSavedAlienProgress()                { return savedAlienProgress; }
+    public void        setSavedAlienProgress(@Nullable CompoundTag t) { savedAlienProgress = t; setDirty(); }
 }

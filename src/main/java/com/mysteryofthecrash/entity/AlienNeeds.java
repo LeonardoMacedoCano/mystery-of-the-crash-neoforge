@@ -14,6 +14,9 @@ public class AlienNeeds {
 
     public float safety      = 10f;
 
+    public float sleepiness  = 20f;
+
+    private static final float SLEEPINESS_RISE_RATE    = 0.02f;
     private static final float CURIOSITY_DECAY_RATE   = 0.05f;
     private static final float BOREDOM_RISE_RATE       = 0.08f;
     private static final float BOREDOM_DECAY_RATE      = 0.12f;
@@ -45,6 +48,8 @@ public class AlienNeeds {
 
         safety         = isNearThreat ? clamp(safety + 3f, 0, 100)
                                       : clamp(safety - 2f, 0, 100);
+
+        sleepiness     = clamp(sleepiness + SLEEPINESS_RISE_RATE * 20, 0, 100);
     }
 
     public void feed(float amount) {
@@ -58,6 +63,7 @@ public class AlienNeeds {
         tag.putFloat("hunger",     hunger);
         tag.putFloat("socialNeed", socialNeed);
         tag.putFloat("safety",     safety);
+        tag.putFloat("sleepiness", sleepiness);
         return tag;
     }
 
@@ -67,6 +73,7 @@ public class AlienNeeds {
         hunger     = tag.getFloat("hunger");
         socialNeed = tag.getFloat("socialNeed");
         safety     = tag.getFloat("safety");
+        sleepiness = tag.contains("sleepiness") ? tag.getFloat("sleepiness") : 20f;
     }
 
     private float clamp(float v, float min, float max) {

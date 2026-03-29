@@ -3,11 +3,11 @@ package com.mysteryofthecrash.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mysteryofthecrash.MysteryOfTheCrash;
 import com.mysteryofthecrash.entity.AlienEntity;
-import com.mysteryofthecrash.entity.LifeStage;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
-import net.minecraft.client.renderer.entity.layers.RenderLayer;
+import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
+import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
 import net.minecraft.resources.ResourceLocation;
 
 public class AlienRenderer extends MobRenderer<AlienEntity, AlienModel<AlienEntity>> {
@@ -18,6 +18,13 @@ public class AlienRenderer extends MobRenderer<AlienEntity, AlienModel<AlienEnti
 
     public AlienRenderer(EntityRendererProvider.Context context) {
         super(context, new AlienModel<>(context.bakeLayer(AlienModelLayer.ALIEN_LAYER)), 0.5f);
+
+        this.addLayer(new HumanoidArmorLayer<>(this,
+                new AlienModel<>(context.bakeLayer(AlienModelLayer.ALIEN_INNER_ARMOR)),
+                new AlienModel<>(context.bakeLayer(AlienModelLayer.ALIEN_OUTER_ARMOR)),
+                context.getModelManager()));
+
+        this.addLayer(new ItemInHandLayer<>(this, context.getItemInHandRenderer()));
     }
 
     @Override
@@ -29,8 +36,8 @@ public class AlienRenderer extends MobRenderer<AlienEntity, AlienModel<AlienEnti
     protected void scale(AlienEntity entity, PoseStack poseStack, float partialTick) {
         float scale = switch (entity.getLifeStage()) {
             case CHILD -> 0.55f;
-            case YOUNG -> 0.80f;
-            case ADULT -> 1.00f;
+            case YOUNG -> 1.00f;
+            case ADULT -> 1.10f;
         };
         poseStack.scale(scale, scale, scale);
     }

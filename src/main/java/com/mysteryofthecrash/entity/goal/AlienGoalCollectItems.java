@@ -24,7 +24,7 @@ public class AlienGoalCollectItems extends Goal {
     @Override
     public boolean canUse() {
         if (!enabled) return false;
-        if (alien.getTrustManager().getTrust() < -20) return false;
+        if (alien.getTrustManager().getHighestTrust() < -20) return false;
 
         targetItem = findNearestItem();
         return targetItem != null;

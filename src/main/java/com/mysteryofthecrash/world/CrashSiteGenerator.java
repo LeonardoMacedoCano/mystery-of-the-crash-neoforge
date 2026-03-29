@@ -128,7 +128,9 @@ public class CrashSiteGenerator {
         }
 
         alien.setCrashSitePos(centre);
-        alien.moveTo(centre.getX() + 0.5, centre.getY() + 1, centre.getZ() + 0.5, 0f, 0f);
+
+        int safeY = level.getHeight(Heightmap.Types.MOTION_BLOCKING, centre.getX(), centre.getZ());
+        alien.moveTo(centre.getX() + 0.5, safeY, centre.getZ() + 0.5, 0f, 0f);
 
         alien.finalizeSpawn(level,
                 level.getCurrentDifficultyAt(centre),

@@ -1,11 +1,15 @@
 package com.mysteryofthecrash.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mysteryofthecrash.entity.AlienEntity;
 import com.mysteryofthecrash.entity.KnowledgeFlags;
 import com.mysteryofthecrash.entity.LifeStage;
+import com.mysteryofthecrash.entity.learning.MineableBlock;
+import com.mysteryofthecrash.entity.learning.MiningKnowledge;
+import com.mysteryofthecrash.world.AlienWorldData;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -33,6 +37,11 @@ public class AlienCommand {
                 .then(Commands.literal("setage")
                     .then(Commands.argument("days", IntegerArgumentType.integer(0, 100))
                         .executes(AlienCommand::setAge)))
+                .then(Commands.literal("sethome")
+                    .executes(AlienCommand::setHome))
+                .then(Commands.literal("keepProgress")
+                    .then(Commands.argument("value", BoolArgumentType.bool())
+                        .executes(AlienCommand::setKeepProgress)))
         );
     }
 
@@ -43,9 +52,19 @@ public class AlienCommand {
             return 0;
         }
 
-        float trust = alien.getTrustManager().getTrust();
+        java.util.UUID issuerId = null;
+        if (ctx.getSource().getEntity() instanceof Player issuer) {
+            issuerId = issuer.getUUID();
+        }
+        float trust = issuerId != null
+                ? alien.getTrustManager().getTrust(issuerId)
+                : alien.getTrustManager().getHighestTrust();
         String trustColor = trust >= 50 ? "§a" : trust >= 0 ? "§e" : trust >= -40 ? "§6" : "§c";
         String trustLabel = trust >= 50 ? "High" : trust >= 0 ? "Neutral" : trust >= -40 ? "Distrustful" : "Avoidant (flees)";
+
+        float obedience = issuerId != null
+                ? alien.getTrustManager().getObedienceChance(issuerId) * 100
+                : 50f;
 
         String knowledge = Arrays.stream(KnowledgeFlags.values())
                 .filter(alien::hasKnowledge)
@@ -53,22 +72,47 @@ public class AlienCommand {
                 .collect(Collectors.joining(", "));
         if (knowledge.isEmpty()) knowledge = "None yet";
 
+        MiningKnowledge mk = alien.getMiningKnowledge();
+        String miningBreakdown = mk.getKnownBlocks().isEmpty()
+                ? "§7None"
+                : mk.getKnownBlocks().stream()
+                        .map(b -> "§f" + b.id + " §8(" + String.format("%.0f", mk.getProficiency(b)) + "§8)")
+                        .collect(Collectors.joining("§7, "));
+
         String command = alien.getAlienBrain() != null && alien.getAlienBrain().isUnderPlayerCommand()
                 ? "§aYes (active)" : "§7No (autonomous)";
 
+        net.minecraft.world.item.ItemStack tool = alien.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND);
+        String toolStr = tool.isEmpty() ? "§7None" : "§f" + tool.getItem().getDescriptionId().replace("item.minecraft.", "").replace("_", " ");
+
+        String stageAbilities = "§7Mining: " + (alien.getLifeStage().canMine ? "§a✓" : "§c✗")
+                + " §7Gear: " + (alien.getLifeStage().canEquipGear ? "§a✓" : "§c✗");
+
+        net.minecraft.core.BlockPos crash = alien.getCrashSitePos();
+        String crashStr = crash != null ? "§f" + crash.getX() + ", " + crash.getY() + ", " + crash.getZ() : "§7Unknown";
+        net.minecraft.core.BlockPos home = alien.getHomePos();
+        String homeStr = home != null ? "§f" + home.getX() + ", " + home.getY() + ", " + home.getZ() : "§7Not set";
+
+        String sleepStr = String.format("%.0f%%", alien.getNeeds().sleepiness);
+
         String msg = "§b══ Alien Status ══\n"
-                + "§7Life stage: §f" + alien.getLifeStage().name() + "\n"
+                + "§7Life stage: §f" + alien.getLifeStage().name() + "  " + stageAbilities + "\n"
                 + "§7Personality: §f" + alien.getPersonality().name() + "\n"
                 + "§7Health: §f" + String.format("%.1f / %.1f", alien.getHealth(), alien.getMaxHealth()) + "\n"
-                + "§7Bond: " + trustColor + trustLabel
+                + "§7Bond with you: " + trustColor + trustLabel
                     + " §8(" + String.format("%.1f", trust) + "§8)\n"
-                + "§7Obedience: §f" + String.format("%.0f%%", alien.getTrustManager().getObedienceChance() * 100) + "\n"
+                + "§7Obedience: §f" + String.format("%.0f%%", obedience) + "\n"
                 + "§7Hunger: §f" + String.format("%.0f%%", alien.getNeeds().hunger) + "\n"
+                + "§7Sleepiness: §f" + sleepStr + "\n"
                 + "§7Curiosity: §f" + String.format("%.0f%%", alien.getNeeds().curiosity) + "\n"
                 + "§7Social need: §f" + String.format("%.0f%%", alien.getNeeds().socialNeed) + "\n"
                 + "§7Safety: §f" + String.format("%.0f%%", alien.getNeeds().safety) + "\n"
                 + "§7Knowledge: §f" + knowledge + "\n"
+                + "§7Mining known: " + miningBreakdown + "\n"
+                + "§7Tool held: " + toolStr + "\n"
                 + "§7Following player command: " + command + "\n"
+                + "§7Spawn (crash site): " + crashStr + "\n"
+                + "§7Home: " + homeStr + "\n"
                 + "§7Position: §f" + (int)alien.getX() + ", " + (int)alien.getY() + ", " + (int)alien.getZ();
 
         ctx.getSource().sendSuccess(() -> Component.literal(msg), false);
@@ -158,6 +202,35 @@ public class AlienCommand {
                 Component.literal("§bAlien age set to §f" + days + " days§b."
                         + " Expected stage: §f" + expected
                         + " §7(transition occurs within 1 second)"), false);
+        return 1;
+    }
+
+    private static int setHome(CommandContext<CommandSourceStack> ctx) {
+        AlienEntity alien = findAlien(ctx.getSource().getLevel());
+        if (alien == null) {
+            ctx.getSource().sendFailure(Component.literal("§cAlien not found."));
+            return 0;
+        }
+
+        net.minecraft.core.BlockPos pos = alien.blockPosition();
+        alien.setHomePos(pos);
+
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§bAlien home set to §f" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
+                + " §7(alien will return here after mining sessions)"
+        ), false);
+        return 1;
+    }
+
+    private static int setKeepProgress(CommandContext<CommandSourceStack> ctx) {
+        boolean value = BoolArgumentType.getBool(ctx, "value");
+        AlienWorldData data = AlienWorldData.get(ctx.getSource().getLevel());
+        data.setRetainProgressOnDeath(value);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§bAlien death behavior: §f" + (value
+                        ? "retain all progress on respawn"
+                        : "reset to baby on respawn")
+        ), false);
         return 1;
     }
 
