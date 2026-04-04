@@ -62,7 +62,11 @@ public class AlienInventoryScreen extends AbstractContainerScreen<AlienInventory
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         if (isMenuInvalid()) {
-            if (this.minecraft != null) this.minecraft.setScreen(null);
+            if (this.minecraft != null && this.minecraft.player != null) {
+                this.minecraft.player.displayClientMessage(
+                        Component.literal("§c[Telepathy] The alien is not nearby."), true);
+                this.minecraft.setScreen(null);
+            }
             return;
         }
         super.render(g, mouseX, mouseY, partialTick);

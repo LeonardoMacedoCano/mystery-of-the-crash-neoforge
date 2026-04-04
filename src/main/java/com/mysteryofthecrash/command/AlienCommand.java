@@ -42,6 +42,8 @@ public class AlienCommand {
                 .then(Commands.literal("keepProgress")
                     .then(Commands.argument("value", BoolArgumentType.bool())
                         .executes(AlienCommand::setKeepProgress)))
+                .then(Commands.literal("debug")
+                    .executes(AlienCommand::showDebug))
         );
     }
 
@@ -231,6 +233,74 @@ public class AlienCommand {
                         ? "retain all progress on respawn"
                         : "reset to baby on respawn")
         ), false);
+        return 1;
+    }
+
+    private static int showDebug(CommandContext<CommandSourceStack> ctx) {
+        AlienEntity alien = findAlien(ctx.getSource().getLevel());
+        if (alien == null) {
+            ctx.getSource().sendFailure(Component.literal("§cAlien not found."));
+            return 0;
+        }
+
+        java.util.UUID issuerId = null;
+        if (ctx.getSource().getEntity() instanceof Player issuer) {
+            issuerId = issuer.getUUID();
+        }
+        float trust = issuerId != null
+                ? alien.getTrustManager().getTrust(issuerId)
+                : alien.getTrustManager().getHighestTrust();
+
+        var brain = alien.getAlienBrain();
+        String mode = "AUTONOMOUS";
+        if (brain != null) {
+            if (brain.isMining())             mode = "MINE";
+            else if (brain.isReturningHome()) mode = "RETURN_HOME";
+            else if (brain.isFollowing())     mode = "FOLLOW_PLAYER";
+            else if (brain.isExploring())     mode = "EXPLORE";
+            else if (brain.isResting())       mode = "REST";
+        }
+
+        var needs = alien.getNeeds();
+        MiningKnowledge mk = alien.getMiningKnowledge();
+
+        String knownFlags = Arrays.stream(KnowledgeFlags.values())
+                .filter(alien::hasKnowledge)
+                .map(k -> k.name().replace("KNOWS_", ""))
+                .collect(Collectors.joining(", "));
+        if (knownFlags.isEmpty()) knownFlags = "none";
+
+        String miningProf = mk.getKnownBlocks().isEmpty()
+                ? "none"
+                : mk.getKnownBlocks().stream()
+                        .map(b -> b.id + "=" + String.format("%.0f", mk.getProficiency(b)) + "%")
+                        .collect(Collectors.joining(", "));
+
+        net.minecraft.world.item.ItemStack stored = alien.getStoredTool();
+        String toolStr = stored.isEmpty() ? "none"
+                : stored.getItem().getDescriptionId().replace("item.minecraft.", "").replace("_", " ");
+
+        int usedSlots = 0;
+        var inv = alien.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (!inv.getItem(i).isEmpty()) usedSlots++;
+        }
+
+        String msg = "§b══ Alien Debug ══\n"
+                + "§7Bond: §f" + String.format("%.1f", trust)
+                + "  §7Hunger: §f" + String.format("%.0f", needs.hunger)
+                + "  §7Boredom: §f" + String.format("%.0f", needs.boredom) + "\n"
+                + "§7Social: §f" + String.format("%.0f", needs.socialNeed)
+                + "  §7Safety: §f" + String.format("%.0f", needs.safety)
+                + "  §7Sleep: §f" + String.format("%.0f", needs.sleepiness) + "\n"
+                + "§7Personality: §f" + alien.getPersonality()
+                + "  §7Stage: §f" + alien.getLifeStage()
+                + "  §7Mode: §f" + mode + "\n"
+                + "§7Known: §f" + knownFlags + "\n"
+                + "§7Mining: §f" + miningProf + "\n"
+                + "§7Tool: §f" + toolStr + "  §7Inventory: §f" + usedSlots + "/27";
+
+        ctx.getSource().sendSuccess(() -> Component.literal(msg), false);
         return 1;
     }
 

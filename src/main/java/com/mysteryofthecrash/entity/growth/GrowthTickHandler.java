@@ -44,7 +44,7 @@ public class GrowthTickHandler {
                 .filter(e -> e instanceof net.minecraft.world.entity.monster.Monster)
                 .toList().isEmpty();
 
-        alien.getNeeds().tick(isIdle, isExploring, nearPlayer, nearThreat);
+        alien.getNeeds().tick(isIdle, isExploring, nearPlayer, nearThreat, 1.0f);
 
         if (currentStage == LifeStage.CHILD && !alien.getPersonalityResolver().isLocked()) {
             if (nearPlayer) {

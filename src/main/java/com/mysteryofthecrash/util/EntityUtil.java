@@ -15,10 +15,17 @@ public final class EntityUtil {
 
     public static Optional<AlienEntity> findAlienGlobal(ServerLevel level) {
         UUID uuid = AlienWorldData.get(level).getAlienUUID();
-        if (uuid == null) return Optional.empty();
-        Entity entity = level.getEntity(uuid);
-        if (entity instanceof AlienEntity alien && alien.isAlive()) {
-            return Optional.of(alien);
+        if (uuid != null) {
+            Entity entity = level.getEntity(uuid);
+            if (entity instanceof AlienEntity alien && alien.isAlive()) {
+                return Optional.of(alien);
+            }
+        }
+        for (Entity e : level.getAllEntities()) {
+            if (e instanceof AlienEntity alien && alien.isAlive()) {
+                AlienWorldData.get(level).setAlienUUID(alien.getUUID());
+                return Optional.of(alien);
+            }
         }
         return Optional.empty();
     }

@@ -104,44 +104,23 @@ public class TelepathicChat {
         broadcastToNearby(alien, message);
     }
 
-    public boolean interpretPlayerMessage(AlienEntity alien, Player player,
-                                          String message, LifeStage stage,
-                                          Personality personality) {
-        String lower = message.toLowerCase();
+    public void interpretPlayerMessage(AlienEntity alien, Player player,
+                                       String message, LifeStage stage,
+                                       Personality personality) {
+        String lower = message.toLowerCase().trim();
 
-        if (lower.contains("come") || lower.contains("follow") || lower.contains("here")) {
-
-            if (alien.getTrustManager().isAvoidantToAll()) {
-                respondTo(alien, stage, personality,
-                        "◈ ...no.",
-                        "I don't want to.",
-                        "You don't get to tell me what to do.");
-            } else {
-                if (alien.getAlienBrain() != null) {
-                    alien.getAlienBrain().commandFollow(player);
-                }
-                respondTo(alien, stage, personality,
-                        "...coming.",
-                        "Okay. I'm coming.",
-                        "On my way.");
-            }
-            return true;
+        if (lower.equals(PlayerCommands.FOLLOW)) {
+            handleFollowCommand(alien, player, stage, personality);
+            return;
         }
 
-        if (lower.contains("stay") || lower.contains("wait") || lower.contains("stop")) {
-
-            if (alien.getAlienBrain() != null) {
-                alien.getAlienBrain().commandStay();
-            }
-            respondTo(alien, stage, personality,
-                    "...still.",
-                    "I'll wait here.",
-                    "Fine. I'll stay.");
-            return true;
+        if (lower.equals(PlayerCommands.STAY)) {
+            handleStayCommand(alien, stage, personality);
+            return;
         }
 
-        if (lower.startsWith("mining:")) {
-            String rest = lower.substring(7).trim();
+        if (lower.startsWith(PlayerCommands.MINE_PREFIX)) {
+            String rest = lower.substring(PlayerCommands.MINE_PREFIX.length()).trim();
             String[] parts = rest.split("\\s+", 2);
             String blockId = parts[0];
             int durationSeconds = 300;
@@ -149,47 +128,37 @@ public class TelepathicChat {
                 try { durationSeconds = Integer.parseInt(parts[1]); } catch (NumberFormatException ignored) {}
             }
             handleMineCommand(alien, player, stage, personality, blockId, durationSeconds * 20);
-            return true;
+            return;
         }
 
-        if (lower.equals("mining")) {
+        if (lower.equals(PlayerCommands.MINE_LIST)) {
             handleMineList(alien, player, stage, personality);
-            return true;
         }
 
-        if (lower.contains("mine") || lower.contains("dig")) {
+    }
+
+    private void handleFollowCommand(AlienEntity alien, Player player,
+                                     LifeStage stage, Personality personality) {
+        if (alien.getTrustManager().isAvoidantToAll()) {
             respondTo(alien, stage, personality,
-                    "◈ ...break?",
-                    "I can try that.",
-                    "I know how to do that. I'll handle it.");
-            return true;
-        }
-
-        if (lower.contains("farm") || lower.contains("plant") || lower.contains("grow")) {
+                    "◈ ...no.",
+                    "I don't want to.",
+                    "You don't get to tell me what to do.");
+        } else {
+            if (alien.getAlienBrain() != null) alien.getAlienBrain().commandFollow(player);
             respondTo(alien, stage, personality,
-                    "...seeds?",
-                    "I've seen you do that. I can try.",
-                    "I'll take care of the planting.");
-            return true;
+                    "...coming.",
+                    "Okay. I'm coming.",
+                    "On my way.");
         }
+    }
 
-        if (lower.contains("help")) {
-            respondTo(alien, stage, personality,
-                    "◈ ◈",
-                    "I want to help. Tell me how.",
-                    "What do you need?");
-            return true;
-        }
-
-        if (lower.contains("eat") || lower.contains("food") || lower.contains("hungry")) {
-            respondTo(alien, stage, personality,
-                    "...hungry... yes.",
-                    "Yes. I'm hungry.",
-                    "I was going to say something about that.");
-            return true;
-        }
-
-        return false;
+    private void handleStayCommand(AlienEntity alien, LifeStage stage, Personality personality) {
+        if (alien.getAlienBrain() != null) alien.getAlienBrain().commandStay();
+        respondTo(alien, stage, personality,
+                "...still.",
+                "I'll wait here.",
+                "Fine. I'll stay.");
     }
 
     private void handleMineList(AlienEntity alien, Player player,

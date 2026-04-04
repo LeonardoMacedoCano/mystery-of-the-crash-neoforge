@@ -13,7 +13,7 @@ import java.util.Random;
 
 public class DecisionEngine {
 
-    private static final Random RNG = new Random();
+    private final Random RNG = new Random();
 
     public static final int DECISION_INTERVAL = 60;
 
@@ -35,19 +35,20 @@ public class DecisionEngine {
         if (ticksSinceDecision < DECISION_INTERVAL) return null;
         ticksSinceDecision = 0;
 
+        var nearP  = alien.level().getNearestPlayer(alien, 32.0);
         Action previous = currentAction;
-        currentAction = evaluate(alien);
+        currentAction = evaluate(alien, nearP);
 
         if (currentAction != previous) {
-            var nearP = alien.level().getNearestPlayer(alien, 32.0);
             float logTrust = (nearP != null)
                     ? alien.getTrustManager().getTrust(nearP.getUUID())
                     : alien.getTrustManager().getHighestTrust();
-            MysteryOfTheCrash.LOGGER.info("[Alien] Decision changed: {} -> {} | Bond={} Hunger={} SocNeed={}",
+            MysteryOfTheCrash.LOGGER.info("[ET/Decision] {} -> {} | Bond={} Hunger={} SocNeed={} Sleep={}",
                     previous, currentAction,
                     String.format("%.0f", logTrust),
                     String.format("%.0f", alien.getNeeds().hunger),
-                    String.format("%.0f", alien.getNeeds().socialNeed));
+                    String.format("%.0f", alien.getNeeds().socialNeed),
+                    String.format("%.0f", alien.getNeeds().sleepiness));
         }
 
         return currentAction;
@@ -55,12 +56,11 @@ public class DecisionEngine {
 
     public Action getCurrentAction() { return currentAction; }
 
-    private Action evaluate(AlienEntity alien) {
+    private Action evaluate(AlienEntity alien, net.minecraft.world.entity.player.Player nearestPlayer) {
         AlienNeeds   needs       = alien.getNeeds();
         Personality  personality = alien.getPersonality();
         TrustManager trust       = alien.getTrustManager();
 
-        var nearestPlayer = alien.level().getNearestPlayer(alien, 32.0);
         float trustLevel = (nearestPlayer != null)
                 ? trust.getTrust(nearestPlayer.getUUID())
                 : trust.getHighestTrust();
@@ -100,7 +100,8 @@ public class DecisionEngine {
         }
         scores.put(Action.ORGANIZE_AREA, organizeScore);
 
-        float restScore = (100f - needs.safety) * 0.3f * personality.restWeight;
+        float restScore = (100f - needs.safety) * 0.3f * personality.restWeight
+                        + needs.sleepiness * 0.25f;
         restScore *= (1f - needs.hunger / 200f);
         scores.put(Action.REST, restScore);
 

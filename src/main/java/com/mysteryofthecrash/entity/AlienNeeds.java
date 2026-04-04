@@ -16,40 +16,30 @@ public class AlienNeeds {
 
     public float sleepiness  = 20f;
 
-    private static final float SLEEPINESS_RISE_RATE    = 0.02f;
-    private static final float CURIOSITY_DECAY_RATE   = 0.05f;
-    private static final float BOREDOM_RISE_RATE       = 0.08f;
-    private static final float BOREDOM_DECAY_RATE      = 0.12f;
-    private static final float HUNGER_RISE_RATE        = 0.04f;
-    private static final float SOCIAL_RISE_RATE        = 0.06f;
-    private static final float SOCIAL_DECAY_RATE       = 0.10f;
+    private static final float CURIOSITY_DECAY_PER_SEC  = 1.0f;
+    private static final float CURIOSITY_RISE_PER_SEC   = 0.4f;
+    private static final float BOREDOM_RISE_PER_SEC     = 1.6f;
+    private static final float BOREDOM_DECAY_PER_SEC    = 2.4f;
+    private static final float HUNGER_BASE_PER_SEC      = 0.8f;
+    private static final float HUNGER_URGENT_MULTIPLIER = 1.5f;
+    private static final float HUNGER_URGENT_THRESHOLD  = 70f;
+    private static final float SOCIAL_DECAY_PER_SEC     = 2.0f;
+    private static final float SOCIAL_RISE_PER_SEC      = 1.2f;
+    private static final float SAFETY_RISE_PER_SEC      = 3.0f;
+    private static final float SAFETY_DECAY_PER_SEC     = 2.0f;
+    private static final float SLEEPINESS_RISE_PER_SEC  = 0.4f;
 
     public void tick(boolean isIdle, boolean isExploring, boolean isNearPlayer,
-                     boolean isNearThreat) {
-        if (isExploring) {
-            curiosity  = clamp(curiosity  - CURIOSITY_DECAY_RATE * 20, 0, 100);
-        } else {
-            curiosity  = clamp(curiosity  + 0.02f * 20, 0, 100);
-        }
+                     boolean isNearThreat, float deltaSeconds) {
+        curiosity  = clamp(curiosity  + (isExploring ? -CURIOSITY_DECAY_PER_SEC : CURIOSITY_RISE_PER_SEC) * deltaSeconds, 0, 100);
+        boredom    = clamp(boredom    + (isIdle ? BOREDOM_RISE_PER_SEC : -BOREDOM_DECAY_PER_SEC) * deltaSeconds, 0, 100);
 
-        if (isIdle) {
-            boredom    = clamp(boredom    + BOREDOM_RISE_RATE  * 20, 0, 100);
-        } else {
-            boredom    = clamp(boredom    - BOREDOM_DECAY_RATE * 20, 0, 100);
-        }
+        float hungerRate = hunger > HUNGER_URGENT_THRESHOLD ? HUNGER_BASE_PER_SEC * HUNGER_URGENT_MULTIPLIER : HUNGER_BASE_PER_SEC;
+        hunger     = clamp(hunger    + hungerRate * deltaSeconds, 0, 100);
 
-        hunger         = clamp(hunger     + HUNGER_RISE_RATE   * 20, 0, 100);
-
-        if (isNearPlayer) {
-            socialNeed = clamp(socialNeed - SOCIAL_DECAY_RATE  * 20, 0, 100);
-        } else {
-            socialNeed = clamp(socialNeed + SOCIAL_RISE_RATE   * 20, 0, 100);
-        }
-
-        safety         = isNearThreat ? clamp(safety + 3f, 0, 100)
-                                      : clamp(safety - 2f, 0, 100);
-
-        sleepiness     = clamp(sleepiness + SLEEPINESS_RISE_RATE * 20, 0, 100);
+        socialNeed = clamp(socialNeed + (isNearPlayer ? -SOCIAL_DECAY_PER_SEC : SOCIAL_RISE_PER_SEC) * deltaSeconds, 0, 100);
+        safety     = clamp(safety    + (isNearThreat  ? SAFETY_RISE_PER_SEC   : -SAFETY_DECAY_PER_SEC) * deltaSeconds, 0, 100);
+        sleepiness = clamp(sleepiness + SLEEPINESS_RISE_PER_SEC * deltaSeconds, 0, 100);
     }
 
     public void feed(float amount) {

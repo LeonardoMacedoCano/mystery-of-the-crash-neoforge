@@ -16,7 +16,6 @@ import net.minecraft.world.level.block.CropBlock;
 public class LearningObserver {
 
     private float miningProgress    = 0f;
-    private float ironProgress      = 0f;
     private float storageProgress   = 0f;
     private float plantingProgress  = 0f;
     private float toolProgress      = 0f;
@@ -123,7 +122,6 @@ public class LearningObserver {
     public net.minecraft.nbt.CompoundTag save() {
         net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
         tag.putFloat("miningProgress",   miningProgress);
-        tag.putFloat("ironProgress",     ironProgress);
         tag.putFloat("storageProgress",  storageProgress);
         tag.putFloat("plantingProgress", plantingProgress);
         tag.putFloat("toolProgress",     toolProgress);
@@ -136,7 +134,6 @@ public class LearningObserver {
 
     public void load(net.minecraft.nbt.CompoundTag tag) {
         miningProgress   = tag.getFloat("miningProgress");
-        ironProgress     = tag.getFloat("ironProgress");
         storageProgress  = tag.getFloat("storageProgress");
         plantingProgress = tag.getFloat("plantingProgress");
         toolProgress     = tag.getFloat("toolProgress");
