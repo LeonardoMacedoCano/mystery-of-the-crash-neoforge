@@ -21,7 +21,9 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.world.DifficultyInstance;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.damagesource.DamageSource;
@@ -59,6 +61,8 @@ public class AlienEntity extends PathfinderMob implements MenuProvider {
     private final TelepathicChat      telepathicChat    = new TelepathicChat();
 
     private AlienBrain alienBrain;
+
+    private ChunkPos selfForcedChunk = null;
 
     private ItemStack storedTool = ItemStack.EMPTY;
 
@@ -125,6 +129,11 @@ public class AlienEntity extends PathfinderMob implements MenuProvider {
         if (level().isClientSide) return;
         ServerLevel serverLevel = (ServerLevel) level();
 
+        updateSelfForcedChunk(serverLevel);
+        if (tickCount % 200 == 0) {
+            AlienWorldData.get(serverLevel).setLastKnownPos(blockPosition());
+        }
+
         if (++secondTickAccumulator >= 20) {
             secondTickAccumulator = 0;
             growthHandler.onSecondTick(this, serverLevel);
@@ -178,12 +187,42 @@ public class AlienEntity extends PathfinderMob implements MenuProvider {
     @Override
     public void die(DamageSource cause) {
         super.die(cause);
-        if (!level().isClientSide && level() instanceof ServerLevel serverLevel) {
-            AlienWorldData data = AlienWorldData.get(serverLevel);
-            data.setNeedsRespawn(true);
-            data.setDirty();
-            MysteryOfTheCrash.LOGGER.info("[Alien] Died. Will respawn at {}", data.getRespawnPos());
+        if (level().isClientSide || !(level() instanceof ServerLevel serverLevel)) return;
+        AlienWorldData data = AlienWorldData.get(serverLevel);
+        if (!getUUID().equals(data.getAlienUUID())) {
+            MysteryOfTheCrash.LOGGER.warn("[Alien] Orphaned ET died — not flagging respawn: {}", getUUID());
+            return;
         }
+        data.setNeedsRespawn(true);
+        data.setDirty();
+        MysteryOfTheCrash.LOGGER.info("[Alien] Died. Will respawn at {}", data.getRespawnPos());
+    }
+
+    @Override
+    public void onAddedToLevel() {
+        super.onAddedToLevel();
+        if (level() instanceof ServerLevel sl) {
+            updateSelfForcedChunk(sl);
+        }
+    }
+
+    @Override
+    public void onRemovedFromLevel() {
+        if (level() instanceof ServerLevel sl && selfForcedChunk != null) {
+            sl.getChunkSource().removeRegionTicket(TicketType.FORCED, selfForcedChunk, 2, selfForcedChunk);
+            selfForcedChunk = null;
+        }
+        super.onRemovedFromLevel();
+    }
+
+    private void updateSelfForcedChunk(ServerLevel level) {
+        ChunkPos current = new ChunkPos(blockPosition());
+        if (current.equals(selfForcedChunk)) return;
+        if (selfForcedChunk != null) {
+            level.getChunkSource().removeRegionTicket(TicketType.FORCED, selfForcedChunk, 2, selfForcedChunk);
+        }
+        selfForcedChunk = current;
+        level.getChunkSource().addRegionTicket(TicketType.FORCED, selfForcedChunk, 2, selfForcedChunk);
     }
 
     @Override

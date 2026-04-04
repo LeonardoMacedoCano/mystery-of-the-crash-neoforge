@@ -21,7 +21,8 @@ public class AlienGoalLevitate extends Goal {
 
     @Override
     public boolean canUse() {
-        if (!alien.getLifeStage().canMine) return false; 
+        if (!alien.getLifeStage().canMine) return false;
+        if (isAlienDoingDirectedMovement()) return false;
         boolean falling   = !alien.onGround() && alien.getDeltaMovement().y < FALL_THRESHOLD;
         boolean wallStuck = alien.horizontalCollision && !alien.getNavigation().isDone();
         return falling || wallStuck;
@@ -30,9 +31,16 @@ public class AlienGoalLevitate extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!alien.getLifeStage().canMine) return false;
+        if (isAlienDoingDirectedMovement()) return false;
         boolean falling   = !alien.onGround() && alien.getDeltaMovement().y < 0.0;
         boolean wallStuck = alien.horizontalCollision && !alien.getNavigation().isDone();
         return falling || wallStuck;
+    }
+
+    private boolean isAlienDoingDirectedMovement() {
+        var brain = alien.getAlienBrain();
+        if (brain == null) return true;
+        return brain.isMining() || brain.isReturningHome();
     }
 
     @Override

@@ -23,6 +23,7 @@ public class AlienWorldData extends SavedData {
     private boolean     retainProgressOnDeath = false;
     @Nullable
     private CompoundTag savedAlienProgress    = null;
+    private BlockPos    lastKnownPos          = BlockPos.ZERO;
 
     private static final SavedData.Factory<AlienWorldData> FACTORY =
             new SavedData.Factory<>(AlienWorldData::new,
@@ -51,6 +52,9 @@ public class AlienWorldData extends SavedData {
         if (savedAlienProgress != null) {
             tag.put("savedAlienProgress", savedAlienProgress);
         }
+        tag.putInt("lastKnownX", lastKnownPos.getX());
+        tag.putInt("lastKnownY", lastKnownPos.getY());
+        tag.putInt("lastKnownZ", lastKnownPos.getZ());
         return tag;
     }
 
@@ -73,6 +77,8 @@ public class AlienWorldData extends SavedData {
         if (tag.contains("savedAlienProgress")) {
             data.savedAlienProgress = tag.getCompound("savedAlienProgress");
         }
+        data.lastKnownPos = new BlockPos(
+                tag.getInt("lastKnownX"), tag.getInt("lastKnownY"), tag.getInt("lastKnownZ"));
         return data;
     }
 
@@ -97,4 +103,7 @@ public class AlienWorldData extends SavedData {
     @Nullable
     public CompoundTag getSavedAlienProgress()                { return savedAlienProgress; }
     public void        setSavedAlienProgress(@Nullable CompoundTag t) { savedAlienProgress = t; setDirty(); }
+
+    public BlockPos getLastKnownPos()                        { return lastKnownPos; }
+    public void     setLastKnownPos(BlockPos pos)            { lastKnownPos = pos; setDirty(); }
 }

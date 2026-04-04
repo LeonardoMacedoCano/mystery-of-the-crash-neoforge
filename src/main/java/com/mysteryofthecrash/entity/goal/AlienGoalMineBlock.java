@@ -7,7 +7,9 @@ import com.mysteryofthecrash.util.BlockUtil;
 import com.mysteryofthecrash.util.ChatUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -20,6 +22,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.tags.FluidTags;
 
+import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
@@ -35,7 +39,7 @@ public class AlienGoalMineBlock extends Goal {
     private static final float  MULT_WRONG_TOOL    = 100.0f;
     private static final float  WRONG_TOOL_PENALTY = 5.0f;
 
-    private static final double REACH_SQ                 = 2.0 * 2.0;
+    private static final double REACH_SQ                 = 2.5 * 2.5;
 
     private static final int    STUCK_THRESHOLD    = 60;
 
@@ -45,22 +49,22 @@ public class AlienGoalMineBlock extends Goal {
 
     private static final int    DROP_LIMIT         = 15;
 
-    private static final int    CLUSTER_FAIL_RADIUS = 5;
+    private static final int    CLUSTER_FAIL_RADIUS = 2;
 
-    private static final int    CLUSTER_Y_RANGE    = 20;
+    private static final int    CLUSTER_Y_RANGE    = 3;
 
     private static final int    SEARCH_RADIUS_MIN  = 5;
     private static final int    SEARCH_RADIUS_STEP = 5;
     private static final int    SEARCH_RADIUS_MAX  = 100;
     private static final int    SEARCH_TICK_DELAY  = 4;
 
-    private static final int    SCAN_BATCH         = 2000;
+    private static final int    SCAN_BATCH         = 4000;
 
     private final AlienEntity alien;
 
     private MineableBlock miningType     = null;
     private BlockPos      currentTarget  = null;
-    private BlockPos      clearTarget    = null;
+    private final ArrayDeque<BlockPos> clearQueue = new ArrayDeque<>();
     private BlockPos      activeBreakPos = null;  
     private Phase         phase          = Phase.SEARCH;
     private boolean       running        = false;
@@ -80,8 +84,12 @@ public class AlienGoalMineBlock extends Goal {
     private int     cachedSurfaceY = 0;
 
     private boolean saidCaveNav      = false;
+    private boolean saidAboveNav     = false;
 
-    private int     digDownStuckTimer = 0;
+    private int     digDownStuckTimer  = 0;
+
+    private int     scanFeedbackTimer  = 0;
+    private static final int SCAN_FEEDBACK_INTERVAL = 200;
 
     private final Set<BlockPos> failedTargets = new HashSet<>();
 
@@ -92,6 +100,8 @@ public class AlienGoalMineBlock extends Goal {
     private int      scanMinZ, scanMaxZ;
     private BlockPos scanBest     = null;
     private double   scanBestDist = Double.MAX_VALUE;
+
+    private ChunkPos forcedChunk = null;
 
     public AlienGoalMineBlock(AlienEntity alien) {
         this.alien = alien;
@@ -110,7 +120,7 @@ public class AlienGoalMineBlock extends Goal {
         this.stuckTimer    = 0;
         this.clearStuck    = 0;
         this.clearAttempts = 0;
-        this.clearTarget   = null;
+        this.clearQueue.clear();
         this.activeBreakPos = null;
         this.searchRadius  = SEARCH_RADIUS_MIN;
         this.searchTick    = 0;
@@ -118,8 +128,11 @@ public class AlienGoalMineBlock extends Goal {
         this.saidExpanding = false;
         this.cachedSurfaceY = 0;
         this.saidCaveNav      = false;
+        this.saidAboveNav     = false;
         this.digDownStuckTimer = 0;
+        this.scanFeedbackTimer = 0;
         this.scanActive    = false;
+        this.forcedChunk   = null;
         this.failedTargets.clear();
     }
 
@@ -168,6 +181,12 @@ public class AlienGoalMineBlock extends Goal {
         sessionStartY = alien.getBlockY();
         ItemStack tool = alien.getStoredTool();
         if (!tool.isEmpty()) alien.setItemSlot(EquipmentSlot.MAINHAND, tool);
+        alien.setInvulnerable(true);
+        alien.setNoGravity(false);
+        if (alien.level() instanceof ServerLevel sl) {
+            forcedChunk = null;
+            updateForcedChunk(sl);
+        }
         MysteryOfTheCrash.LOGGER.info("[AlienMine] Start — type={}, dur={}t, tool={}, Y={}",
                 miningType != null ? miningType.id : "?", durationTicks,
                 !tool.isEmpty() ? tool.getItem() : "NONE", sessionStartY);
@@ -180,6 +199,7 @@ public class AlienGoalMineBlock extends Goal {
     @Override
     public void stop() {
         clearAllProgress();
+        alien.setNoGravity(false);
         ItemStack activeTool = alien.getItemBySlot(EquipmentSlot.MAINHAND);
         if (!activeTool.isEmpty()) {
             alien.setStoredTool(activeTool);
@@ -187,11 +207,13 @@ public class AlienGoalMineBlock extends Goal {
         }
         running        = false;
         currentTarget  = null;
-        clearTarget    = null;
+        clearQueue.clear();
         activeBreakPos = null;
         miningType     = null;
         scanActive     = false;
         alien.getNavigation().stop();
+        alien.setInvulnerable(false);
+        if (alien.level() instanceof ServerLevel sl) releaseForcedChunk(sl);
 
         if (mineCount > 0)
             MysteryOfTheCrash.LOGGER.info("[AlienMine] Session ended — mined: {}", mineCount);
@@ -220,6 +242,7 @@ public class AlienGoalMineBlock extends Goal {
     @Override
     public void tick() {
         if (!(alien.level() instanceof ServerLevel sl)) return;
+        updateForcedChunk(sl);
         if (miningType == null) { stop(); return; }
         elapsedTicks++;
 
@@ -242,15 +265,8 @@ public class AlienGoalMineBlock extends Goal {
             BlockPos center = alien.blockPosition();
             scanMinX = center.getX() - searchRadius;
             scanMaxX = center.getX() + searchRadius;
-            int surfaceHere = level.getHeight(
-                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, alien.getBlockX(), alien.getBlockZ());
-            if (alien.getBlockY() < surfaceHere - 2) {
-                scanMinY = Math.max(miningType.searchMinY, alien.getBlockY() - 20);
-                scanMaxY = Math.min(miningType.searchMaxY, alien.getBlockY() + 20);
-            } else {
-                scanMinY = miningType.searchMinY;
-                scanMaxY = miningType.searchMaxY;
-            }
+            scanMinY = miningType.searchMinY;
+            scanMaxY = miningType.searchMaxY;
             scanMinZ = center.getZ() - searchRadius;
             scanMaxZ = center.getZ() + searchRadius;
             scanX = scanMinX; scanY = scanMinY; scanZ = scanMinZ;
@@ -291,6 +307,18 @@ public class AlienGoalMineBlock extends Goal {
             }
             scanX = scanMinX;
             scanY++;
+        }
+
+        if (scanY <= scanMaxY) {
+            scanFeedbackTimer++;
+            if (scanFeedbackTimer >= SCAN_FEEDBACK_INTERVAL) {
+                scanFeedbackTimer = 0;
+                int totalY = Math.max(1, scanMaxY - scanMinY + 1);
+                int pct    = (int)(100f * (scanY - scanMinY) / totalY);
+                say("◈ ...",
+                    "Still searching... " + pct + "% scanned.",
+                    "Scanning. " + pct + "% done.");
+            }
         }
 
         if (scanY > scanMaxY) {
@@ -389,28 +417,53 @@ public class AlienGoalMineBlock extends Goal {
                 return;
             }
 
+            if (currentTarget.getY() >= alien.getBlockY() + DIG_THRESHOLD) {
+                if (cachedSurfaceY == 0) {
+                    cachedSurfaceY = level.getHeight(
+                            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                            currentTarget.getX(), currentTarget.getZ());
+                }
+                alien.getNavigation().moveTo(
+                        currentTarget.getX() + 0.5, cachedSurfaceY, currentTarget.getZ() + 0.5, 1.0);
+                stuckTimer++;
+                int hdx = Math.abs(alien.getBlockX() - currentTarget.getX());
+                int hdz = Math.abs(alien.getBlockZ() - currentTarget.getZ());
+                if (hdx <= 1 && hdz <= 1) {
+                    if (!saidAboveNav) {
+                        saidAboveNav   = true;
+                        cachedSurfaceY = 0;
+                        phase          = Phase.DIG_DOWN;
+                        breakTimer     = 0;
+                        alien.getNavigation().stop();
+                        say("◈ ...up.",
+                            "Ore is above me. Going to surface to dig down.",
+                            "Target is above current depth. Heading to surface.");
+                    } else if (stuckTimer >= STUCK_THRESHOLD * 2) {
+                        markCurrentTargetFailed();
+                    }
+                } else if (stuckTimer >= STUCK_THRESHOLD * 2) {
+                    markCurrentTargetFailed();
+                }
+                return;
+            }
+
             alien.getNavigation().moveTo(
                     currentTarget.getX() + 0.5, currentTarget.getY(), currentTarget.getZ() + 0.5, 1.0);
             stuckTimer++;
 
             if (stuckTimer >= STUCK_THRESHOLD) {
                 stuckTimer = 0;
-                if (clearAttempts >= MAX_CLEAR_ATTEMPTS) {
-                    markCurrentTargetFailed(); 
+                List<BlockPos> passage = computeBlockingPassage(level, alien.blockPosition(), currentTarget);
+                if (passage.isEmpty()) {
+                    markCurrentTargetFailed();
                     return;
                 }
-
-                BlockPos blocking = findHorizontalBlocking(level, alien.blockPosition(), currentTarget);
-                if (blocking != null) {
-                    clearTarget    = blocking;
-                    phase          = Phase.CLEAR_PATH;
-                    breakTimer     = 0;
-                    clearStuck     = 0;
-                    clearAttempts++;
-                } else {
-
-                    markCurrentTargetFailed();
-                }
+                clearQueue.clear();
+                clearQueue.addAll(passage);
+                clearAttempts++;
+                phase      = Phase.CLEAR_PATH;
+                breakTimer = 0;
+                clearStuck = 0;
             }
         }
     }
@@ -448,6 +501,21 @@ public class AlienGoalMineBlock extends Goal {
         }
 
         BlockState state = level.getBlockState(digPos);
+        if (!state.getFluidState().isEmpty()) {
+            if (state.getFluidState().is(FluidTags.LAVA)) {
+                markCurrentTargetFailed();
+                return;
+            }
+            digDownStuckTimer++;
+            if (digDownStuckTimer >= STUCK_THRESHOLD) {
+                markCurrentTargetFailed();
+                return;
+            }
+            alien.teleportTo(alien.getX(), alien.getY() - 1.0, alien.getZ());
+            breakTimer = 0;
+            clearAllProgress();
+            return;
+        }
         if (state.isAir()) {
 
             if (alien.onGround()) {
@@ -510,49 +578,60 @@ public class AlienGoalMineBlock extends Goal {
             collectDrops(level, digPos, state);
             level.removeBlock(digPos, false);
             level.levelEvent(2001, digPos, Block.getId(state));
+            alien.setDeltaMovement(alien.getDeltaMovement().x(), -0.1, alien.getDeltaMovement().z());
             breakTimer = 0;
         }
     }
 
     private void tickClearPath(ServerLevel level) {
-        if (clearTarget == null || level.getBlockState(clearTarget).isAir()) {
-            clearTarget = null;
-            phase       = Phase.NAVIGATE;
-            stuckTimer  = 0;
+        while (!clearQueue.isEmpty() && level.getBlockState(clearQueue.peek()).isAir()) {
+            clearQueue.poll();
+        }
+
+        if (clearQueue.isEmpty()) {
+            phase      = Phase.NAVIGATE;
+            stuckTimer = 0;
+            breakTimer = 0;
             return;
         }
 
+        BlockPos target = clearQueue.peek();
         alien.getLookControl().setLookAt(
-                clearTarget.getX() + 0.5, clearTarget.getY() + 0.5, clearTarget.getZ() + 0.5);
+                target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5);
 
-        double distSq = alien.blockPosition().distSqr(clearTarget);
+        double distSq = alien.blockPosition().distSqr(target);
         if (distSq > REACH_SQ + 2) {
             alien.getNavigation().moveTo(
-                    clearTarget.getX() + 0.5, clearTarget.getY(), clearTarget.getZ() + 0.5, 1.0);
+                    target.getX() + 0.5, target.getY(), target.getZ() + 0.5, 1.0);
             clearStuck++;
             if (clearStuck >= STUCK_THRESHOLD) {
-                resetToSearch(); 
+                if (clearAttempts >= MAX_CLEAR_ATTEMPTS) {
+                    markCurrentTargetFailed();
+                } else {
+                    resetToSearch();
+                }
             }
             return;
         }
 
         alien.getNavigation().stop();
-        BlockState state    = level.getBlockState(clearTarget);
-        int        reqTicks = calculateBreakTicks(state, clearTarget, false);
+        BlockState state    = level.getBlockState(target);
+        int        reqTicks = calculateBreakTicks(state, target, false);
 
         int crack = Math.min(9, breakTimer * 10 / Math.max(1, reqTicks));
-        level.destroyBlockProgress(alien.getId() + 1, clearTarget, crack);
+        level.destroyBlockProgress(alien.getId() + 1, target, crack);
+        activeBreakPos = target;
 
         breakTimer++;
         if (breakTimer >= reqTicks) {
-            level.destroyBlockProgress(alien.getId() + 1, clearTarget, -1);
-            collectDrops(level, clearTarget, state);
-            level.removeBlock(clearTarget, false);
-            level.levelEvent(2001, clearTarget, Block.getId(state));
-            clearTarget = null;
-            phase       = Phase.NAVIGATE;
-            breakTimer  = 0;
-            stuckTimer  = 0;
+            level.destroyBlockProgress(alien.getId() + 1, target, -1);
+            activeBreakPos = null;
+            collectDrops(level, target, state);
+            level.removeBlock(target, false);
+            level.levelEvent(2001, target, Block.getId(state));
+            clearQueue.poll();
+            breakTimer = 0;
+            clearStuck = 0;
         }
     }
 
@@ -572,14 +651,15 @@ public class AlienGoalMineBlock extends Goal {
             return;
         }
 
-        BlockPos obstacle = findObstacleDense(level, alien.blockPosition(), currentTarget);
-        if (obstacle != null) {
+        List<BlockPos> passage = computeBlockingPassage(level, alien.blockPosition(), currentTarget);
+        if (!passage.isEmpty()) {
             clearAllProgress();
-            clearTarget    = obstacle;
-            phase          = Phase.CLEAR_PATH;
-            breakTimer     = 0;
-            clearStuck     = 0;
+            clearQueue.clear();
+            clearQueue.addAll(passage);
             clearAttempts++;
+            phase      = Phase.CLEAR_PATH;
+            breakTimer = 0;
+            clearStuck = 0;
             return;
         }
 
@@ -611,6 +691,11 @@ public class AlienGoalMineBlock extends Goal {
         collectDrops(level, currentTarget, state);
         level.removeBlock(currentTarget, false);
         level.levelEvent(2001, currentTarget, Block.getId(state));
+        alien.setNoGravity(false);
+        alien.setDeltaMovement(
+                alien.getDeltaMovement().x(),
+                Math.min(alien.getDeltaMovement().y(), -0.1),
+                alien.getDeltaMovement().z());
         alien.getMiningKnowledge().addProficiencyOnMine(miningType);
         mineCount++;
 
@@ -631,7 +716,31 @@ public class AlienGoalMineBlock extends Goal {
         if (mineCount % 3 == 0)
             alien.getTelepathicChat().sendRandomMessage(alien, alien.getLifeStage(), alien.getPersonality());
 
+        if (scanAdjacentForVein(level)) return;
         resetToSearch();
+    }
+
+    private boolean scanAdjacentForVein(ServerLevel level) {
+        BlockPos minedPos = currentTarget;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    BlockPos candidate = minedPos.offset(dx, dy, dz);
+                    if (failedTargets.contains(candidate)) continue;
+                    if (!miningType.matches(level.getBlockState(candidate).getBlock())) continue;
+                    currentTarget  = candidate;
+                    phase          = Phase.NAVIGATE;
+                    stuckTimer     = 0;
+                    cachedSurfaceY = 0;
+                    saidAboveNav   = false;
+                    saidCaveNav    = false;
+                    breakTimer     = 0;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean isTargetStillValid(ServerLevel level) {
@@ -642,7 +751,7 @@ public class AlienGoalMineBlock extends Goal {
     private void resetToSearch() {
         clearAllProgress();
         currentTarget  = null;
-        clearTarget    = null;
+        clearQueue.clear();
         phase          = Phase.SEARCH;
         breakTimer     = 0;
         stuckTimer     = 0;
@@ -654,7 +763,9 @@ public class AlienGoalMineBlock extends Goal {
         saidExpanding  = false;
         cachedSurfaceY = 0;
         saidCaveNav       = false;
+        saidAboveNav      = false;
         digDownStuckTimer = 0;
+        scanFeedbackTimer = 0;
         scanActive        = false;
     }
 
@@ -773,46 +884,66 @@ public class AlienGoalMineBlock extends Goal {
                     level, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, rem));
     }
 
-    private static BlockPos findHorizontalBlocking(ServerLevel level, BlockPos from, BlockPos to) {
-        double dx = to.getX() - from.getX();
-        double dz = to.getZ() - from.getZ();
+    private static List<BlockPos> computeBlockingPassage(ServerLevel level, BlockPos from, BlockPos to) {
+        List<BlockPos> blocked = new ArrayList<>();
+        int x = from.getX(), z = from.getZ();
+        int toX = to.getX(), toZ = to.getZ();
+        if (x == toX && z == toZ) return blocked;
 
-        double hDist = Math.sqrt(dx * dx + dz * dz);
-        if (hDist < 0.5) return null;
+        int stepX = Integer.signum(toX - x);
+        int stepZ = Integer.signum(toZ - z);
+        int absDx = Math.abs(toX - x);
+        int absDz = Math.abs(toZ - z);
+        Set<BlockPos> seen = new HashSet<>();
 
-        double dy   = to.getY() - from.getY();
-        double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        int    steps = (int)(dist * 4) + 4;
-        BlockPos floor = from.below();
+        long tMaxX   = absDx > 0 ? absDz          : Long.MAX_VALUE / 2;
+        long tMaxZ   = absDz > 0 ? absDx          : Long.MAX_VALUE / 2;
+        long tDeltaX = absDx > 0 ? 2L * absDz     : Long.MAX_VALUE / 2;
+        long tDeltaZ = absDz > 0 ? 2L * absDx     : Long.MAX_VALUE / 2;
 
-        for (int i = 1; i <= steps; i++) {
-            double   t = (double) i / steps;
-            BlockPos p = BlockPos.containing(
-                    from.getX() + dx * t, from.getY() + dy * t, from.getZ() + dz * t);
-            if (p.equals(to) || p.equals(from) || p.equals(floor)) continue;
-            BlockState st = level.getBlockState(p);
-            if (!st.isAir() && st.getFluidState().isEmpty()) return p.immutable();
+        while (x != toX || z != toZ) {
+            addCellIfBlocking(level, x, from.getY(), z, from, to, seen, blocked);
+            if (tMaxX == tMaxZ) {
+                addCellIfBlocking(level, x + stepX, from.getY(), z, from, to, seen, blocked);
+                addCellIfBlocking(level, x, from.getY(), z + stepZ, from, to, seen, blocked);
+                x += stepX; z += stepZ;
+                tMaxX += tDeltaX; tMaxZ += tDeltaZ;
+            } else if (tMaxX < tMaxZ) {
+                x += stepX; tMaxX += tDeltaX;
+            } else {
+                z += stepZ; tMaxZ += tDeltaZ;
+            }
         }
-        return null;
+        return blocked;
     }
 
-    private static BlockPos findObstacleDense(ServerLevel level, BlockPos from, BlockPos to) {
-        double dx   = to.getX() - from.getX();
-        double dy   = to.getY() - from.getY();
-        double dz   = to.getZ() - from.getZ();
-        double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist < 0.5) return null;
-
-        int steps = (int)(dist * 4) + 4;
-        for (int i = 1; i <= steps; i++) {
-            double   t = (double) i / steps;
-            BlockPos p = BlockPos.containing(
-                    from.getX() + dx * t, from.getY() + dy * t, from.getZ() + dz * t);
-            if (p.equals(to) || p.equals(from)) continue;
+    private static void addCellIfBlocking(ServerLevel level, int x, int y, int z,
+            BlockPos from, BlockPos to, Set<BlockPos> seen, List<BlockPos> blocked) {
+        for (int dy = 0; dy <= 1; dy++) {
+            BlockPos p = new BlockPos(x, y + dy, z);
+            if (seen.contains(p) || p.equals(from) || p.equals(to)) continue;
             BlockState st = level.getBlockState(p);
-            if (!st.isAir() && st.getFluidState().isEmpty()) return p.immutable();
+            if (!st.isAir() && st.getFluidState().isEmpty()) {
+                blocked.add(p);
+                seen.add(p);
+            }
         }
-        return null;
+    }
+
+    private void updateForcedChunk(ServerLevel level) {
+        ChunkPos current = new ChunkPos(alien.blockPosition());
+        if (current.equals(forcedChunk)) return;
+        if (forcedChunk != null) {
+            level.getChunkSource().removeRegionTicket(TicketType.FORCED, forcedChunk, 2, forcedChunk);
+        }
+        forcedChunk = current;
+        level.getChunkSource().addRegionTicket(TicketType.FORCED, forcedChunk, 2, forcedChunk);
+    }
+
+    private void releaseForcedChunk(ServerLevel level) {
+        if (forcedChunk == null) return;
+        level.getChunkSource().removeRegionTicket(TicketType.FORCED, forcedChunk, 2, forcedChunk);
+        forcedChunk = null;
     }
 
     public boolean isRunning() { return running; }
